@@ -3,13 +3,21 @@
 GO ?= go
 GOFMT ?= gofmt
 NODE ?= node
+COMPOSE ?= docker compose
 
 .PHONY: help run build test test-web test-race test-integration migrate cover fmt vet check
+.PHONY: docker-build docker-up docker-down docker-migrate docker-logs docker-config
 
 help:
 	@printf '%s\n' \
 		'make run       — запустить сервер (нужен DATABASE_URL)' \
 		'make build     — собрать сервер и миграции в bin/' \
+		'make docker-build — собрать образ приложения (сначала скопируйте .env.example в .env)' \
+		'make docker-up — запустить окружение и дождаться готовности' \
+		'make docker-down — остановить окружение, сохранив данные БД' \
+		'make docker-migrate — запустить миграции отдельным контейнером' \
+		'make docker-logs — показать логи окружения' \
+		'make docker-config — проверить конфигурацию Compose' \
 		'make test      — запустить тесты' \
 		'make test-web  — проверить денежные расчёты интерфейса (нужен Node.js 18+)' \
 		'make test-race — запустить тесты с детектором гонок (нужны CGO и C-компилятор)' \
@@ -22,6 +30,24 @@ help:
 
 run:
 	$(GO) run ./cmd/server
+
+docker-build:
+	$(COMPOSE) build
+
+docker-up:
+	$(COMPOSE) up --detach --wait --wait-timeout 90
+
+docker-down:
+	$(COMPOSE) down
+
+docker-migrate:
+	$(COMPOSE) run --rm migrate
+
+docker-logs:
+	$(COMPOSE) logs --follow
+
+docker-config:
+	$(COMPOSE) config --quiet
 
 build:
 	mkdir -p bin
