@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>
+      Личный бюджет — учёт расходов
+    </title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script type="module" src="/assets/app.mjs">
+    </script>
+  </head>
+  <body>
+    <header class="header">
+      <a class="brand" href="/" aria-label="Личный бюджет, главная">
+        <span class="brand-icon">
+          ₽
+        </span>
+        Личный бюджет
+      </a>
+      <span class="header-note">
+        Меньше догадок. Больше ясности.
+      </span>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <p class="eyebrow">
+            ВАШИ ФИНАНСЫ
+          </p>
+          <h1>
+            Каждый расход
+            <br>
+            на своём месте.
+          </h1>
+          <p class="subtitle">
+            Записывайте траты и понимайте, куда уходят деньги.
+          </p>
+        </div>
+        <div class="intro-mark" aria-hidden="true">
+          ₽
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Разделы">
+        <button type="button" id="expenses-tab" aria-pressed="true">
+          Расходы
+        </button>
+        <button type="button" id="categories-tab" aria-pressed="false">
+          Категории
+        </button>
+      </nav>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden>
+      </div>
+      <p id="loading" class="loading" role="status" hidden>
+        Загружаем данные…
+      </p>
+      <section id="expenses-panel" aria-labelledby="expenses-tab">
+        <div class="summary-grid">
+          <article class="summary">
+            <p>
+              Всего за выбранный период
+            </p>
+            <strong id="total">
+              —
+            </strong>
+            <span id="expense-count">
+              Данные ещё не загружены
+            </span>
+          </article>
+          <article class="tip">
+            <span class="tip-label">
+              Небольшая привычка
+            </span>
+            <h2>
+              Начните с сегодняшнего дня
+            </h2>
+            <p>
+              Даже кофе по пути домой — часть общей картины.
+            </p>
+            <button type="button" id="add-expense" class="primary" disabled>
+              + Добавить расход
+            </button>
+            <small id="category-hint">
+              Сначала добавьте категорию в разделе «Категории».
+            </small>
+          </article>
+        </div>
+        <section class="card">
+          <div class="section-heading">
+            <h2>
+              История расходов
+            </h2>
+            <button type="button" id="refresh" class="quiet">
+              Обновить
+            </button>
+          </div>
+          <form id="filters" class="filters">
+            <label>
+              Категория
+              <select id="filter-category">
+                <option value="">
+                  Все категории
+                </option>
+              </select>
+            </label>
+            <label>
+              С даты
+              <input type="date" id="date-from" min="0001-01-02" max="9999-12-31">
+            </label>
+            <label>
+              По дату
+              <input type="date" id="date-to" min="0001-01-02" max="9999-12-31">
+            </label>
+            <button class="secondary" type="submit">
+              Применить
+            </button>
+            <button class="quiet" type="button" id="reset-filters">
+              Сбросить
+            </button>
+          </form>
+          <p id="empty-expenses" class="empty" hidden>
+            Здесь пока нет расходов. Добавьте первую запись или измените фильтры.
+          </p>
+          <div class="table-scroll">
+            <table id="expenses-table" hidden>
+              <thead>
+                <tr>
+                  <th>
+                    Дата
+                  </th>
+                  <th>
+                    Категория / комментарий
+                  </th>
+                  <th class="amount">
+                    Сумма
+                  </th>
+                  <th>
+                    <span class="visually-hidden">
+                      Действия
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody id="expense-rows">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+      <section id="categories-panel" class="card" aria-labelledby="categories-tab" hidden>
+        <div class="section-heading">
+          <div>
+            <h2>
+              Категории
+            </h2>
+            <p class="muted">
+              Разделите траты так, как удобно вам.
+            </p>
+          </div>
+          <button id="add-category" class="primary" type="button">
+            + Добавить категорию
+          </button>
+        </div>
+        <p id="empty-categories" class="empty" hidden>
+          Начните с простого: продукты, транспорт или дом.
+        </p>
+        <ul id="category-list" class="category-list">
+        </ul>
+      </section>
+      <footer>
+        Одна запись — чуть больше порядка в финансах.
+      </footer>
+    </main>
+    <dialog id="expense-dialog" aria-labelledby="expense-title">
+      <form id="expense-form">
+        <h2 id="expense-title">
+          Новый расход
+        </h2>
+        <p class="muted">
+          Сохраните детали, пока они под рукой.
+        </p>
+        <label>
+          Категория
+          <select id="expense-category" required>
+          </select>
+        </label>
+        <div class="form-pair">
+          <label>
+            Сумма, ₽
+            <input id="expense-amount" type="text" inputmode="decimal" placeholder="0,00" required autocomplete="off" maxlength="18">
+          </label>
+          <label>
+            Дата
+            <input id="expense-date" type="date" min="0001-01-02" max="9999-12-31" required>
+          </label>
+        </div>
+        <label>
+          Комментарий
+          <span class="muted">
+            (необязательно)
+          </span>
+          <input id="expense-comment" type="text" maxlength="1000" placeholder="Например, продукты на неделю">
+        </label>
+        <p id="expense-error" class="form-error" role="alert" hidden>
+        </p>
+        <div class="dialog-actions">
+          <button type="button" data-close="expense-dialog" class="quiet">
+            Отмена
+          </button>
+          <button type="submit" class="primary">
+            Сохранить расход
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="category-dialog" aria-labelledby="category-title">
+      <form id="category-form">
+        <h2 id="category-title">
+          Новая категория
+        </h2>
+        <label>
+          Название
+          <input id="category-name" type="text" required maxlength="100" placeholder="Например, продукты" autocomplete="off">
+        </label>
+        <p id="category-error" class="form-error" role="alert" hidden>
+        </p>
+        <div class="dialog-actions">
+          <button type="button" data-close="category-dialog" class="quiet">
+            Отмена
+          </button>
+          <button type="submit" class="primary">
+            Сохранить категорию
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

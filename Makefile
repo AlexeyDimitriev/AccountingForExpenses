@@ -2,14 +2,16 @@
 
 GO ?= go
 GOFMT ?= gofmt
+NODE ?= node
 
-.PHONY: help run build test test-race test-integration migrate cover fmt vet check
+.PHONY: help run build test test-web test-race test-integration migrate cover fmt vet check
 
 help:
 	@printf '%s\n' \
 		'make run       — запустить сервер (нужен DATABASE_URL)' \
 		'make build     — собрать сервер и миграции в bin/' \
 		'make test      — запустить тесты' \
+		'make test-web  — проверить денежные расчёты интерфейса (нужен Node.js 18+)' \
 		'make test-race — запустить тесты с детектором гонок (нужны CGO и C-компилятор)' \
 		'make test-integration — проверить PostgreSQL (нужен TEST_DATABASE_URL; создаются временные схемы)' \
 		'make migrate   — применить SQL-миграции (нужен DATABASE_URL)' \
@@ -26,14 +28,18 @@ build:
 	$(GO) build -o bin/server ./cmd/server
 	$(GO) build -o bin/migrate ./cmd/migrate
 
-test:
+test: test-web
 	$(GO) test -count=1 ./...
+
+test-web:
+	$(NODE) --test web/money_test.mjs
 
 test-race:
 	$(GO) test -race -count=1 ./...
 
 test-integration:
 	@test -n "$$TEST_DATABASE_URL" || { printf '%s\n' 'Задайте TEST_DATABASE_URL для тестовой PostgreSQL'; exit 1; }
+	$(MAKE) test-web
 	$(GO) test -tags=integration -race -count=1 -timeout=120s ./...
 
 migrate:
@@ -46,13 +52,13 @@ cover:
 	$(GO) tool cover -html=coverage/coverage.out -o coverage/index.html
 
 fmt:
-	$(GOFMT) -w cmd internal migrations
+	$(GOFMT) -w cmd internal migrations web
 
 vet:
 	$(GO) vet ./...
 
 check:
-	@unformatted=$$($(GOFMT) -l cmd internal migrations); \
+	@unformatted=$$($(GOFMT) -l cmd internal migrations web); \
 	status=$$?; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
 	if [ -n "$$unformatted" ]; then \

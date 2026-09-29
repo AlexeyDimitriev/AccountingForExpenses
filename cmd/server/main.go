@@ -46,6 +46,7 @@ func run(ctx context.Context, settings config.Config, logger *slog.Logger) error
 	categories := postgres.NewCategoryRepository(pool)
 	expenses := postgres.NewExpenseRepository(pool)
 	api := httpapi.NewRouter(application.NewCategoryService(categories, expenses), application.NewExpenseService(expenses, categories))
+	api = httpapi.WithFrontend(api)
 	ready := func(checkContext context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
