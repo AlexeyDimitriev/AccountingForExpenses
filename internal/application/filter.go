@@ -3,7 +3,7 @@ package application
 import (
 	"time"
 
-	"github.com/AlexeyDimitriev/AccountingForExpenses/internal/domain"
+	"AccountingForExpenses/internal/domain"
 )
 
 // ExpenseFilter задаёт включительные границы календарных дат; нулевые поля отключают фильтр.

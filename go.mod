@@ -1,3 +1,3 @@
-module github.com/AlexeyDimitriev/AccountingForExpenses
+module AccountingForExpenses
 
 go 1.26.0

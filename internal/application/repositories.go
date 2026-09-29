@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 
-	"github.com/AlexeyDimitriev/AccountingForExpenses/internal/domain"
+	"AccountingForExpenses/internal/domain"
 )
 
 // CategoryRepository хранит категории; отсутствующие записи возвращают ErrCategoryNotFound.

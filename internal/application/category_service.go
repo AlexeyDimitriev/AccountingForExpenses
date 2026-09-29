@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/AlexeyDimitriev/AccountingForExpenses/internal/domain"
+	"AccountingForExpenses/internal/domain"
 )
 
 type CategoryService struct {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 
-	"github.com/AlexeyDimitriev/AccountingForExpenses/internal/domain"
+	"AccountingForExpenses/internal/domain"
 )
 
 type ExpenseService struct {

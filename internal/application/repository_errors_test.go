@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexeyDimitriev/AccountingForExpenses/internal/domain"
+	"AccountingForExpenses/internal/domain"
 )
 
 type repositoryFailure struct {
