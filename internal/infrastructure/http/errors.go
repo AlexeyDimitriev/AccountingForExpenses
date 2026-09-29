@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"AccountingForExpenses/internal/application"
@@ -32,6 +34,14 @@ func badRequest(message string) error {
 
 // writeError преобразует известные ошибки в HTTP-ответ, скрывая внутренние детали остальных ошибок.
 func writeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		writeJSON(w, http.StatusGatewayTimeout, errorResponse{errorDetails{"request_timeout", "Время выполнения запроса истекло"}})
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		writeJSON(w, http.StatusRequestTimeout, errorResponse{errorDetails{"request_canceled", "Запрос отменён"}})
+		return
+	}
 	var invalid *requestError
 	if errors.As(err, &invalid) {
 		writeJSON(w, invalid.status, errorResponse{errorDetails{invalid.code, invalid.message}})
@@ -59,5 +69,6 @@ func writeError(w http.ResponseWriter, err error) {
 			return
 		}
 	}
+	slog.Error("Ошибка обработки запроса", "error", err)
 	writeJSON(w, http.StatusInternalServerError, errorResponse{errorDetails{"internal_error", "Внутренняя ошибка сервера"}})
 }

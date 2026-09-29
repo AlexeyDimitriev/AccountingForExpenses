@@ -3,10 +3,12 @@
 GO ?= go
 GOFMT ?= gofmt
 
-.PHONY: help test test-race test-integration migrate cover fmt vet check
+.PHONY: help run build test test-race test-integration migrate cover fmt vet check
 
 help:
 	@printf '%s\n' \
+		'make run       — запустить сервер (нужен DATABASE_URL)' \
+		'make build     — собрать сервер и миграции в bin/' \
 		'make test      — запустить тесты' \
 		'make test-race — запустить тесты с детектором гонок (нужны CGO и C-компилятор)' \
 		'make test-integration — проверить PostgreSQL (нужен TEST_DATABASE_URL; создаются временные схемы)' \
@@ -16,6 +18,14 @@ help:
 		'make vet       — выполнить статический анализ' \
 		'make check     — проверить форматирование, выполнить анализ и тесты'
 
+run:
+	$(GO) run ./cmd/server
+
+build:
+	mkdir -p bin
+	$(GO) build -o bin/server ./cmd/server
+	$(GO) build -o bin/migrate ./cmd/migrate
+
 test:
 	$(GO) test -count=1 ./...
 
@@ -24,7 +34,7 @@ test-race:
 
 test-integration:
 	@test -n "$$TEST_DATABASE_URL" || { printf '%s\n' 'Задайте TEST_DATABASE_URL для тестовой PostgreSQL'; exit 1; }
-	$(GO) test -tags=integration -race -count=1 -timeout=120s ./internal/infrastructure/postgres/...
+	$(GO) test -tags=integration -race -count=1 -timeout=120s ./...
 
 migrate:
 	@test -n "$$DATABASE_URL" || { printf '%s\n' 'Задайте DATABASE_URL'; exit 1; }
