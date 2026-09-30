@@ -4,8 +4,9 @@ GO ?= go
 GOFMT ?= gofmt
 NODE ?= node
 COMPOSE ?= docker compose
+PYTHON ?= python3
 
-.PHONY: help run build test test-web test-race test-integration migrate cover fmt vet check
+.PHONY: help run build test test-web test-race test-integration test-e2e migrate cover fmt vet check
 .PHONY: docker-build docker-up docker-down docker-migrate docker-logs docker-config
 
 help:
@@ -22,6 +23,7 @@ help:
 		'make test-web  — проверить денежные расчёты интерфейса (нужен Node.js 18+)' \
 		'make test-race — запустить тесты с детектором гонок (нужны CGO и C-компилятор)' \
 		'make test-integration — проверить PostgreSQL (нужен TEST_DATABASE_URL; создаются временные схемы)' \
+		'make test-e2e  — сквозные тесты двух серверов в Docker (нужны Docker Compose и Python 3.9+)' \
 		'make migrate   — применить SQL-миграции (нужен DATABASE_URL)' \
 		'make cover     — создать отчёт покрытия в coverage/index.html' \
 		'make fmt       — отформатировать Go-код' \
@@ -59,6 +61,9 @@ test: test-web
 
 test-web:
 	$(NODE) --test web/money_test.mjs
+
+test-e2e:
+	$(PYTHON) tests/e2e.py --compose "$(COMPOSE)"
 
 test-race:
 	$(GO) test -race -count=1 ./...
