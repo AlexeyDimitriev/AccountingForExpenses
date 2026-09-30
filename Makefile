@@ -8,6 +8,7 @@ PYTHON ?= python3
 
 .PHONY: help run build test test-web test-race test-integration test-e2e migrate cover fmt vet check
 .PHONY: docker-build docker-up docker-down docker-migrate docker-logs docker-config
+.PHONY: archive
 
 help:
 	@printf '%s\n' \
@@ -26,12 +27,16 @@ help:
 		'make test-e2e  — сквозные тесты двух серверов в Docker (нужны Docker Compose и Python 3.9+)' \
 		'make migrate   — применить SQL-миграции (нужен DATABASE_URL)' \
 		'make cover     — создать отчёт покрытия в coverage/index.html' \
+		'make archive   — собрать исходники и отчёт в dist/AccountingForExpenses.zip (нужен Python 3.9+)' \
 		'make fmt       — отформатировать Go-код' \
 		'make vet       — выполнить статический анализ' \
 		'make check     — проверить форматирование, выполнить анализ и тесты'
 
 run:
 	$(GO) run ./cmd/server
+
+archive:
+	$(PYTHON) scripts/archive.py
 
 docker-build:
 	$(COMPOSE) build
