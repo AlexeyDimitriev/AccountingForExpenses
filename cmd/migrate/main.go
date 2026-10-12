@@ -8,11 +8,13 @@ import (
 	"syscall"
 	"time"
 
+	"AccountingForExpenses/internal/infrastructure/logging"
 	"AccountingForExpenses/internal/infrastructure/postgres"
 )
 
-// main запускает миграции отдельным процессом и возвращает ненулевой код при ошибке.
+// Запускает миграции отдельным процессом и возвращает ненулевой код при ошибке.
 func main() {
+	slog.SetDefault(logging.New(os.Stdout, "expenses-migrate", slog.LevelInfo))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	err := run(ctx)
 	stop()

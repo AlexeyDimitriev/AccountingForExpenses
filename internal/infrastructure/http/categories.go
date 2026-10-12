@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -40,6 +41,7 @@ func (api *handler) categoryCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		slog.InfoContext(r.Context(), "Категория создана", "event", "category.created", "category_id", category.ID, "category_name", category.Name)
 		w.Header().Set("Location", "/api/categories/"+strconv.FormatInt(category.ID, 10))
 		writeJSON(w, http.StatusCreated, categoryResponse{category.ID, category.Name})
 	default:
@@ -72,17 +74,29 @@ func (api *handler) categoryItem(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		previous, err := api.categories.Get(r.Context(), id)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		category, err := api.categories.Update(r.Context(), domain.Category{ID: id, Name: input.Name})
 		if err != nil {
 			writeError(w, err)
 			return
 		}
+		slog.InfoContext(r.Context(), "Категория изменена", "event", "category.updated", "category_id", category.ID, "old_name", previous.Name, "new_name", category.Name)
 		writeJSON(w, http.StatusOK, categoryResponse{category.ID, category.Name})
 	case http.MethodDelete:
+		category, err := api.categories.Get(r.Context(), id)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		if err := api.categories.Delete(r.Context(), id); err != nil {
 			writeError(w, err)
 			return
 		}
+		slog.InfoContext(r.Context(), "Категория удалена", "event", "category.deleted", "category_id", id, "category_name", category.Name)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

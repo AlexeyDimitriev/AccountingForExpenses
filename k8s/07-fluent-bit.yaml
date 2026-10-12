@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: expenses-fluent-bit
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush 1
+        Grace 10
+        Log_Level info
+        Parsers_File /fluent-bit/etc/parsers.conf
+        storage.path /fluent-bit/state/chunks
+
+    [INPUT]
+        Name tail
+        Tag expenses
+        Path /var/log/containers/expenses-app-*_default_app-*.log,/var/log/containers/expenses-migrate-*_default_migrate-*.log
+        Parser docker_json
+        Path_Key log_file
+        DB /fluent-bit/state/tail.db
+        Read_from_Head On
+        Refresh_Interval 2
+        Rotate_Wait 10
+        Buffer_Max_Size 1M
+        Skip_Long_Lines On
+        storage.type filesystem
+
+    [FILTER]
+        Name grep
+        Match expenses
+        Regex stream ^stdout$
+
+    [FILTER]
+        Name parser
+        Match expenses
+        Key_Name log
+        Parser application_json
+        Reserve_Data On
+        Preserve_Key Off
+
+    [FILTER]
+        Name grep
+        Match expenses
+        Regex timestamp .+
+
+    [FILTER]
+        Name modify
+        Match expenses
+        Remove time
+
+    [OUTPUT]
+        Name http
+        Match expenses
+        Host victoria-logs
+        Port 9428
+        URI /insert/jsonline?_stream_fields=service.name&_time_field=timestamp&_msg_field=message
+        Format json_lines
+        Json_Date_Key false
+        Retry_Limit False
+        storage.total_limit_size 128M
+
+  parsers.conf: |
+    [PARSER]
+        Name docker_json
+        Format json
+
+    [PARSER]
+        Name application_json
+        Format json
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: expenses-fluent-bit
+spec:
+  selector:
+    matchLabels:
+      app: expenses-fluent-bit
+  template:
+    metadata:
+      labels:
+        app: expenses-fluent-bit
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: fluent-bit
+        image: cr.fluentbit.io/fluent/fluent-bit:5.1.3
+        args: ["-c", "/fluent-bit/etc/fluent-bit.conf"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: config
+          mountPath: /fluent-bit/etc
+          readOnly: true
+        - name: logs
+          mountPath: /var/log
+          readOnly: true
+        - name: docker-logs
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: state
+          mountPath: /fluent-bit/state
+      volumes:
+      - name: config
+        configMap:
+          name: expenses-fluent-bit
+      - name: logs
+        hostPath:
+          path: /var/log
+          type: Directory
+      - name: docker-logs
+        hostPath:
+          path: /var/lib/docker/containers
+          type: Directory
+      - name: state
+        hostPath:
+          path: /var/lib/fluent-bit-expenses
+          type: DirectoryOrCreate

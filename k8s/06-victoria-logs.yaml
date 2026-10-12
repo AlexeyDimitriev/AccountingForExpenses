@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: victoria-logs-data
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: victoria-logs
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: victoria-logs
+  template:
+    metadata:
+      labels:
+        app: victoria-logs
+    spec:
+      containers:
+      - name: victoria-logs
+        image: victoriametrics/victoria-logs:v1.53.0
+        args:
+        - -storageDataPath=/victoria-logs-data
+        - -retentionPeriod=7d
+        ports:
+        - name: http
+          containerPort: 9428
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 3
+          timeoutSeconds: 2
+        volumeMounts:
+        - name: data
+          mountPath: /victoria-logs-data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: victoria-logs-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: victoria-logs
+spec:
+  type: ClusterIP
+  selector:
+    app: victoria-logs
+  ports:
+  - name: http
+    port: 9428
+    targetPort: http

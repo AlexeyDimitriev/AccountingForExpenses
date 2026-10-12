@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -74,11 +75,21 @@ func (api *handler) expenseCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		if err := expense.Validate(); err != nil {
+			writeError(w, err)
+			return
+		}
+		category, err := api.categories.Get(r.Context(), expense.CategoryID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		expense, err = api.expenses.Create(r.Context(), expense)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
+		slog.InfoContext(r.Context(), "Расход добавлен", expenseEventFields("expense.created", expense, category)...)
 		w.Header().Set("Location", "/api/expenses/"+strconv.FormatInt(expense.ID, 10))
 		writeJSON(w, http.StatusCreated, expenseJSON(expense))
 	default:
@@ -116,17 +127,48 @@ func (api *handler) expenseItem(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		if err := expense.Validate(); err != nil {
+			writeError(w, err)
+			return
+		}
+		previous, err := api.expenses.Get(r.Context(), id)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		previousCategory, err := api.categories.Get(r.Context(), previous.CategoryID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		category, err := api.categories.Get(r.Context(), expense.CategoryID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		expense, err = api.expenses.Update(r.Context(), expense)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
+		slog.InfoContext(r.Context(), "Расход изменён", expenseChangeFields(previous, expense, previousCategory, category)...)
 		writeJSON(w, http.StatusOK, expenseJSON(expense))
 	case http.MethodDelete:
+		expense, err := api.expenses.Get(r.Context(), id)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		category, err := api.categories.Get(r.Context(), expense.CategoryID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		if err := api.expenses.Delete(r.Context(), id); err != nil {
 			writeError(w, err)
 			return
 		}
+		slog.InfoContext(r.Context(), "Расход удалён", expenseEventFields("expense.deleted", expense, category)...)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -157,4 +199,28 @@ func parseFilter(rawQuery string) (application.ExpenseFilter, error) {
 		}
 	}
 	return filter, filter.Validate()
+}
+
+func expenseEventFields(event string, expense domain.Expense, category domain.Category) []any {
+	return []any{"event", event, "expense_id", expense.ID,
+		"category_id", expense.CategoryID, "category_name", category.Name,
+		"amount_kopecks", expense.AmountKopecks, "date", expense.Date.Format(time.DateOnly)}
+}
+
+func expenseChangeFields(previous, current domain.Expense, previousCategory, currentCategory domain.Category) []any {
+	fields := []any{"event", "expense.updated", "expense_id", current.ID}
+	if previous.CategoryID != current.CategoryID {
+		fields = append(fields, "old_category_id", previous.CategoryID, "new_category_id", current.CategoryID,
+			"old_category_name", previousCategory.Name, "new_category_name", currentCategory.Name)
+	}
+	if previous.AmountKopecks != current.AmountKopecks {
+		fields = append(fields, "old_amount_kopecks", previous.AmountKopecks, "new_amount_kopecks", current.AmountKopecks)
+	}
+	if !previous.Date.Equal(current.Date) {
+		fields = append(fields, "old_date", previous.Date.Format(time.DateOnly), "new_date", current.Date.Format(time.DateOnly))
+	}
+	if previous.Comment != current.Comment {
+		fields = append(fields, "comment_changed", true)
+	}
+	return fields
 }

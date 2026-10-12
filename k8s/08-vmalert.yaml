@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: expenses-alert-rules
+data:
+  alerts.yaml: |
+    groups:
+    - name: expenses-errors
+      type: vlogs
+      interval: 15s
+      rules:
+      - alert: ExpensesApplicationErrors
+        expr: '_time:5m service.name:="expenses-app" level:="ERROR" | stats count() as errors | filter errors:>=1'
+        labels:
+          severity: warning
+          service: expenses-app
+        annotations:
+          summary: Ошибки приложения за последние 5 минут
+          description: 'Количество записей ERROR за последние 5 минут: {{ $value }}'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmalert
+  template:
+    metadata:
+      labels:
+        app: vmalert
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: vmalert
+        image: victoriametrics/vmalert:v1.154.0
+        args:
+        - -rule=/etc/vmalert/alerts.yaml
+        - -datasource.url=http://victoria-logs:9428
+        - -rule.evalDelay=0s
+        - -notifier.blackhole
+        ports:
+        - name: http
+          containerPort: 8880
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 3
+        volumeMounts:
+        - name: rules
+          mountPath: /etc/vmalert
+          readOnly: true
+      volumes:
+      - name: rules
+        configMap:
+          name: expenses-alert-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+spec:
+  selector:
+    app: vmalert
+  ports:
+  - name: http
+    port: 8880
+    targetPort: http

@@ -10,12 +10,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"AccountingForExpenses/internal/infrastructure/logging"
 )
 
-// TestRequestLogging проверяет структурированный журнал и отсутствие query-параметров в нём.
+// Проверяет структурированный журнал и отсутствие query-параметров в нём.
 func TestRequestLogging(t *testing.T) {
 	var output bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	logger := logging.New(&output, "expenses-app", slog.LevelInfo)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := r.Context().Deadline(); !ok {
 			t.Fatal("request has no deadline")
@@ -26,13 +28,25 @@ func TestRequestLogging(t *testing.T) {
 	})
 	api := WithRequestLogging(next, logger, time.Second)
 	response := httptest.NewRecorder()
+	started := time.Now()
 	api.ServeHTTP(response, httptest.NewRequest("GET", "/path?secret=value", nil))
+	elapsedMS := float64(time.Since(started)) / float64(time.Millisecond)
 	var entry map[string]any
 	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
 		t.Fatal(err)
 	}
 	if entry["status"] != float64(201) || entry["bytes"] != float64(2) || entry["path"] != "/path" || strings.Contains(output.String(), "secret") {
 		t.Fatal(output.String())
+	}
+	duration, ok := entry["duration_ms"].(float64)
+	if !ok || duration < 0 || duration > elapsedMS {
+		t.Fatalf("invalid duration_ms: %v (elapsed %v ms)", entry["duration_ms"], elapsedMS)
+	}
+	if entry["service.name"] != "expenses-app" || entry["message"] != "HTTP-запрос" || entry["method"] != "GET" {
+		t.Fatal(output.String())
+	}
+	if _, exists := entry["duration"]; exists {
+		t.Fatal("unexpected duration field")
 	}
 }
 
@@ -92,5 +106,38 @@ func TestResponseWriter(t *testing.T) {
 	writeError(response, context.Canceled)
 	if response.Code != 408 {
 		t.Fatal(response.Code)
+	}
+}
+
+func TestHealthRequestLogLevels(t *testing.T) {
+	for _, path := range []string{"/healthz", "/readyz", "/api/categories"} {
+		for _, status := range []int{200, 204, 400, 503} {
+			for _, threshold := range []slog.Level{slog.LevelInfo, slog.LevelDebug} {
+				var output bytes.Buffer
+				next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) })
+				api := WithRequestLogging(next, logging.New(&output, "expenses-app", threshold), time.Second)
+				api.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
+				want := "INFO"
+				if path != "/api/categories" && status < 300 {
+					want = "DEBUG"
+				}
+				if status >= 500 {
+					want = "ERROR"
+				}
+				if want == "DEBUG" && threshold == slog.LevelInfo {
+					if output.Len() != 0 {
+						t.Fatalf("successful health check logged at INFO: %s", output.String())
+					}
+					continue
+				}
+				var entry map[string]any
+				if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+					t.Fatal(err)
+				}
+				if entry["level"] != want {
+					t.Fatalf("%s status %d: got %v, want %s", path, status, entry["level"], want)
+				}
+			}
+		}
 	}
 }

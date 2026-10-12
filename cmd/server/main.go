@@ -13,13 +13,14 @@ import (
 	"AccountingForExpenses/internal/application"
 	"AccountingForExpenses/internal/infrastructure/config"
 	httpapi "AccountingForExpenses/internal/infrastructure/http"
+	"AccountingForExpenses/internal/infrastructure/logging"
 	"AccountingForExpenses/internal/infrastructure/postgres"
 )
 
-// main запускает сервер и переводит SIGINT и SIGTERM в корректное завершение приложения.
+// Запускает сервер и переводит SIGINT и SIGTERM в корректное завершение приложения.
 func main() {
 	settings, err := config.Load()
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: settings.LogLevel}))
+	logger := logging.New(os.Stdout, "expenses-app", settings.LogLevel)
 	slog.SetDefault(logger)
 	if err != nil {
 		logger.Error("Ошибка конфигурации", "error", err)

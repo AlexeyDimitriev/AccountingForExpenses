@@ -58,10 +58,13 @@ func WithRequestLogging(next http.Handler, logger *slog.Logger, timeout time.Dur
 				status = http.StatusOK
 			}
 			level := slog.LevelInfo
-			if status >= 500 {
+			if status >= 200 && status < 300 && (r.URL.Path == "/readyz" || r.URL.Path == "/healthz") {
+				level = slog.LevelDebug
+			}
+			if status >= 500 || panicValue != nil {
 				level = slog.LevelError
 			}
-			logger.Log(r.Context(), level, "HTTP-запрос", "method", r.Method, "path", r.URL.Path, "status", status, "bytes", writer.bytes, "duration", time.Since(started))
+			logger.Log(r.Context(), level, "HTTP-запрос", "method", r.Method, "path", r.URL.Path, "status", status, "bytes", writer.bytes, "duration_ms", float64(time.Since(started))/float64(time.Millisecond))
 			if panicValue != nil && committed {
 				panic(http.ErrAbortHandler)
 			}

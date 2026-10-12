@@ -8,8 +8,9 @@ COPY cmd/ cmd/
 COPY internal/ internal/
 COPY migrations/ migrations/
 COPY web/ web/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+RUN export GOMAXPROCS=2 GOFLAGS=-p=2 CGO_ENABLED=0 \
+    && go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server \
+    && go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 FROM alpine:3.23@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0
 

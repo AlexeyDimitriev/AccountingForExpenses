@@ -11,7 +11,7 @@ def main():
             "Dockerfile", "compose.yaml", ".env.example", ".gitignore", ".dockerignore",
         )
     ]
-    for directory in ("cmd", "internal", "migrations", "web", "tests", "scripts", "k8s"):
+    for directory in ("cmd", "internal", "migrations", "web", "tests", "scripts", "k8s", "screenshots"):
         files.extend(
             path for path in (root / directory).rglob("*")
             if path.is_file() and "__pycache__" not in path.parts

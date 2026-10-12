@@ -139,6 +139,89 @@ kubectl --context=minikube -n default get events --sort-by=.metadata.creationTim
 PVC или всего кластера может удалить данные. Для обычной остановки
 эти операции не нужны.
 
+## VictoriaLogs
+
+VictoriaLogs single-node разворачивается в том же minikube. Манифест
+`k8s/06-victoria-logs.yaml` создаёт Deployment, Service и PVC на 2 GiB.
+Данные хранятся в `/victoria-logs-data`, срок хранения составляет 7 дней.
+
+```sh
+kubectl --context=minikube -n default apply -f k8s/06-victoria-logs.yaml
+kubectl --context=minikube -n default rollout status deployment/victoria-logs --timeout=300s
+kubectl --context=minikube -n default port-forward service/victoria-logs 9428:9428
+```
+
+Оставьте последнюю команду работающей и откройте http://localhost:9428/select/vmui/.
+Внутри namespace `default` сервис доступен по адресу `http://victoria-logs:9428`.
+Проверка готовности использует `/health`. При пересоздании пода данные сохраняются
+на PVC. После пересоздания пода команду `port-forward` нужно запустить заново.
+
+### Доставка логов через Fluent Bit
+
+Манифест `k8s/07-fluent-bit.yaml` содержит ConfigMap и DaemonSet. В однодовом
+minikube работает один сборщик. Он читает stdout контейнеров `expenses-app` и
+`expenses-migrate` в namespace `default`. Конфигурация рассчитана на Docker runtime.
+
+```sh
+kubectl --context=minikube -n default apply -f k8s/07-fluent-bit.yaml
+kubectl --context=minikube -n default rollout status daemonset/expenses-fluent-bit --timeout=300s
+kubectl --context=minikube -n default logs -l app=expenses-fluent-bit --tail=30
+```
+
+Fluent Bit читает файлы через `/var/log/containers`. Каталоги `/var/log` и
+`/var/lib/docker/containers` подключены с узла только для чтения, поскольку файлы
+контейнеров доступны через символические ссылки. Сборщик работает от root для чтения
+этих файлов, но не использует privileged-режим или доступ к Kubernetes API.
+
+Первый парсер разбирает оболочку Docker, второй разбирает JSON приложения из поля
+`log`. Записи без `timestamp` пропускаются. Поля HTTP-запросов сохраняются отдельно.
+Fluent Bit отправляет записи через HTTP `/insert/jsonline`. VictoriaLogs использует
+`timestamp` как `_time`, `message` как `_msg`, а `service.name` как поле потока.
+Поле `log_file` позволяет определить под, из которого пришла запись.
+
+Позиции чтения и очередь отправки находятся на узле в `/var/lib/fluent-bit-expenses`.
+При пересоздании сборщика чтение продолжается с сохранённой позиции. Для новых файлов
+оно начинается с начала. Очередь ограничена 128 MiB, неудачные отправки повторяются.
+При длительной недоступности VictoriaLogs и переполнении очереди возможна потеря
+старых записей. Доставка не гарантирует отсутствие дублей при повторных отправках.
+
+Для проверки в vmui выполните:
+
+```text
+_time:15m service.name:="expenses-app"
+```
+
+После изменения ConfigMap перезапустите сборщик:
+
+```sh
+kubectl --context=minikube -n default rollout restart daemonset/expenses-fluent-bit
+kubectl --context=minikube -n default rollout status daemonset/expenses-fluent-bit --timeout=180s
+```
+
+## Алерт на ошибки приложения
+
+Манифест `k8s/08-vmalert.yaml` запускает vmalert и содержит правило
+`ExpensesApplicationErrors`. Каждые 15 секунд оно проверяет, есть ли записи
+`ERROR` сервиса `expenses-app` за последние 5 минут. Условие и аннотации
+находятся в ConfigMap этого манифеста.
+
+```sh
+kubectl --context=minikube -n default apply -f k8s/08-vmalert.yaml
+kubectl --context=minikube -n default rollout status deployment/vmalert --timeout=180s
+kubectl --context=minikube -n default port-forward service/vmalert 8880:8880
+```
+
+Интерфейс доступен по адресу http://localhost:8880/vmalert/.
+`Firing` означает наличие ошибок в выбранном окне, `Inactive` означает,
+что условие не выполняется. Дополнительной задержки `for` нет.
+После последней ошибки алерт снимается примерно через 5 минут, с учётом
+интервала проверки. Доставка логов тоже занимает некоторое время.
+
+Режим `-notifier.blackhole` позволяет наблюдать состояние в интерфейсе,
+без внешних уведомлений. История состояний не сохраняется в отдельном
+хранилище. После перезапуска vmalert заново вычисляет состояние по логам.
+После изменения ConfigMap перезапустите Deployment `vmalert`.
+
 ## Настройки
 
 Образец настроек — [.env.example](.env.example). Compose читает `.env` и передаёт значения контейнерам. Сам Go-сервер читает только переменные окружения. Файл `.env` не включается в Git и архив исходников; пароль в примере предназначен для локального учебного запуска.
@@ -162,6 +245,36 @@ PVC или всего кластера может удалить данные. �
 В Compose параметры `POSTGRES_USER`, `POSTGRES_PASSWORD` и `POSTGRES_DB` также передаются приложению как `PGUSER`, `PGPASSWORD` и `PGDATABASE`. Драйвер использует их вместе с `DATABASE_URL`. PostgreSQL не публикует порт на хост: к нему обращаются контейнеры во внутренней сети. Настройки `POSTGRES_*` создают пользователя и базу при инициализации пустого тома; смена значений в `.env` не меняет уже созданные роли и базы.
 
 `HTTP_WRITE_TIMEOUT` должен быть больше `HTTP_REQUEST_TIMEOUT`, а `CONTAINER_STOP_TIMEOUT` — больше `HTTP_SHUTDOWN_TIMEOUT`. После изменения настроек выполните `make docker-up`; после изменения исходников сначала выполните `make docker-build`.
+
+## Логи приложения
+
+Сервер и миграции пишут по одной JSON-записи на строку в stdout. Общий логгер
+настроен в `internal/infrastructure/logging`. Каждая запись содержит `timestamp`
+в формате RFC3339 с часовым поясом, `level`, `message` и `service.name`.
+Имя сервиса равно `expenses-app` для сервера и `expenses-migrate` для миграций.
+
+Записи HTTP-запросов также содержат `method`, `path`, `status`, `bytes` и
+`duration_ms`. Длительность задана числом в миллисекундах с дробной частью.
+Параметры строки запроса и тела запросов в журнал не записываются.
+Успешные проверки `/healthz` и `/readyz` записываются на уровне `DEBUG`,
+ошибки сервера и паники на уровне `ERROR`, остальные запросы на уровне `INFO`.
+
+После успешного создания, изменения и удаления категории или расхода сервер
+записывает событие с понятным сообщением. Поле `event` содержит `category.created`,
+`category.updated`, `category.deleted`, `expense.created`, `expense.updated` или
+`expense.deleted`. Поля `category_id` и `expense_id` указывают идентификатор
+соответствующего объекта. События создания и удаления категории содержат
+`category_name`, а изменения категории содержат `old_name` и `new_name`.
+
+При создании и удалении расхода записываются `category_id`, `category_name`,
+`amount_kopecks` (целое число копеек) и `date` в формате `YYYY-MM-DD`.
+При изменении расхода только изменённые поля получают префиксы `old_` и `new_`.
+Смена категории включает её идентификатор и название до и после изменения.
+Изменение комментария отмечается флагом `comment_changed`, сам текст не записывается.
+Значения до изменения и удаления читаются перед выполнением операции.
+События предназначены для диагностики и не являются транзакционным журналом аудита.
+
+Уровень сервера задаётся через `LOG_LEVEL`, миграции используют уровень `INFO`.
 
 ## Устройство проекта
 

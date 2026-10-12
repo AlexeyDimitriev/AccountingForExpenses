@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"AccountingForExpenses/internal/application"
 	"AccountingForExpenses/internal/domain"
+	"AccountingForExpenses/internal/infrastructure/logging"
 )
 
 // testRouter создаёт обработчик с настоящими сервисами и изолированными репозиториями в памяти.
@@ -218,4 +221,63 @@ func TestBodyLimitsAndContentType(t *testing.T) {
 		}
 	}
 	request(t, router, "GET", "/api/categories", "", 200)
+}
+
+func TestMutationEvents(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(logging.New(&output, "expenses-app", slog.LevelInfo))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	router := testRouter()
+	tests := []struct {
+		method, path, body string
+		status             int
+		event              string
+		fields             map[string]any
+	}{
+		{"POST", "/api/categories", `{"name":"  Продукты  "}`, 201, "category.created", map[string]any{"category_id": float64(1), "category_name": "Продукты"}},
+		{"PUT", "/api/categories/1", `{"name":"  Еда  "}`, 200, "category.updated", map[string]any{"category_id": float64(1), "old_name": "Продукты", "new_name": "Еда"}},
+		{"POST", "/api/categories", `{"name":"Дом"}`, 201, "category.created", map[string]any{"category_id": float64(2), "category_name": "Дом"}},
+		{"POST", "/api/expenses", `{"category_id":1,"amount_kopecks":987654,"date":"2026-10-12","comment":"private-comment"}`, 201, "expense.created", map[string]any{"expense_id": float64(1), "category_id": float64(1), "category_name": "Еда", "amount_kopecks": float64(987654), "date": "2026-10-12"}},
+		{"DELETE", "/api/categories/1", "", 409, "", nil},
+		{"PUT", "/api/expenses/1", `{"category_id":2,"amount_kopecks":12500,"date":"2026-10-13","comment":"private-updated-comment"}`, 200, "expense.updated", map[string]any{"expense_id": float64(1), "old_category_id": float64(1), "new_category_id": float64(2), "old_category_name": "Еда", "new_category_name": "Дом", "old_amount_kopecks": float64(987654), "new_amount_kopecks": float64(12500), "old_date": "2026-10-12", "new_date": "2026-10-13", "comment_changed": true}},
+		{"PUT", "/api/expenses/1", `{"category_id":2,"amount_kopecks":12600,"date":"2026-10-13","comment":"private-updated-comment"}`, 200, "expense.updated", map[string]any{"expense_id": float64(1), "old_amount_kopecks": float64(12500), "new_amount_kopecks": float64(12600)}},
+		{"POST", "/api/categories", `{"name":""}`, 400, "", nil},
+		{"POST", "/api/expenses", `{"category_id":999,"amount_kopecks":1,"date":"2026-10-12"}`, 404, "", nil},
+		{"PUT", "/api/expenses/1", `{"category_id":999,"amount_kopecks":1,"date":"2026-10-12"}`, 404, "", nil},
+		{"DELETE", "/api/expenses/1", "", 204, "expense.deleted", map[string]any{"expense_id": float64(1), "category_id": float64(2), "category_name": "Дом", "amount_kopecks": float64(12600), "date": "2026-10-13"}},
+		{"PUT", "/api/expenses/1", `{"category_id":1,"amount_kopecks":1,"date":"2026-10-12"}`, 404, "", nil},
+		{"DELETE", "/api/expenses/1", "", 404, "", nil},
+		{"DELETE", "/api/categories/1", "", 204, "category.deleted", map[string]any{"category_id": float64(1), "category_name": "Еда"}},
+		{"PUT", "/api/categories/1", `{"name":"Нет"}`, 404, "", nil},
+		{"DELETE", "/api/categories/1", "", 404, "", nil},
+	}
+	for _, test := range tests {
+		output.Reset()
+		request(t, router, test.method, test.path, test.body, test.status)
+		if test.event == "" {
+			if output.Len() != 0 {
+				t.Fatalf("failed operation logged success: %s", output.String())
+			}
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry["event"] != test.event || entry["message"] == "" || entry["level"] != "INFO" || entry["service.name"] != "expenses-app" {
+			t.Fatal(output.String())
+		}
+		for key, want := range test.fields {
+			if entry[key] != want {
+				t.Fatalf("%s field %s: got %v, want %v", test.event, key, entry[key], want)
+			}
+		}
+		if len(entry) != len(test.fields)+5 {
+			t.Fatalf("unexpected event fields: %s", output.String())
+		}
+		if strings.Contains(output.String(), "private-") {
+			t.Fatal(output.String())
+		}
+	}
 }
