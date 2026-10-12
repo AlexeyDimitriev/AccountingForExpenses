@@ -4,7 +4,7 @@
 
 В интерфейсе можно создавать, просматривать, изменять и удалять категории и расходы. У расхода есть сумма, дата, категория и необязательный комментарий. Список фильтруется по категории и датам; рядом отображается сумма выбранных расходов. Категорию с расходами удалить нельзя — сначала нужно перенести или удалить связанные записи.
 
-Бэкенд написан на Go, данные хранятся в PostgreSQL. Фронтенд — HTML, CSS и JavaScript без фреймворков. Он обращается к REST API по HTTP и отдаётся тем же сервером. Подробности задания и разбор 12 факторов находятся в [отчёте](Отчёт.md).
+Бэкенд написан на Go, данные хранятся в PostgreSQL. Фронтенд — HTML, CSS и JavaScript без фреймворков. Он обращается к REST API по HTTP и отдаётся тем же сервером. Развёртывание в Kubernetes описано в [отчёте](Отчёт.md).
 
 ## Запуск через Docker
 
@@ -36,6 +36,108 @@ make docker-down
 ```
 
 `make docker-down` сохраняет данные в томе PostgreSQL. После следующего `make docker-up` записи останутся на месте. Команда `docker compose down --volumes` удаляет и том с данными, поэтому для обычной остановки она не нужна.
+
+## Запуск в minikube
+
+Нужны Docker, minikube и kubectl. Все команды выполняются из корня проекта.
+Манифесты находятся в `k8s/`, ресурсы создаются в стандартном namespace `default`.
+
+### Подготовка образа
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+minikube start --driver=docker --container-runtime=docker --cpus=2 --memory=4096
+eval "$(minikube docker-env)"
+docker build -t accounting-for-expenses:local .
+docker save accounting-for-expenses:local -o /tmp/accounting-for-expenses-image.tar
+minikube image load /tmp/accounting-for-expenses-image.tar
+eval "$(minikube docker-env -u)"
+minikube image ls
+```
+
+При сборке через `docker-env` образ уже находится в minikube; сохранение и загрузка
+показаны отдельно для выполнения шага `minikube image load` из задания.
+Сервер и миграции используют один образ с `imagePullPolicy: IfNotPresent`.
+
+### Развёртывание
+
+```sh
+make k8s-up
+```
+
+Команда выполняет `scripts/k8s-up.sh`: создаёт настройки и PostgreSQL, ждёт готовности
+базы, пересоздаёт Job миграций и ждёт его успешного завершения, затем запускает приложение.
+Повторные миграции пропускают уже применённые SQL-файлы. При ошибке миграций скрипт
+останавливается и выводит диагностику. Для первого запуска скачивается образ PostgreSQL.
+
+Те же этапы вручную (подходят для записи демонстрации):
+
+```sh
+kubectl --context=minikube -n default apply -f k8s/01-config.yaml -f k8s/02-secret.yaml
+kubectl --context=minikube -n default apply -f k8s/03-postgres.yaml
+kubectl --context=minikube -n default rollout status deployment/postgres --timeout=300s
+kubectl --context=minikube -n default delete job expenses-migrate --ignore-not-found --wait=true
+kubectl --context=minikube -n default apply -f k8s/04-migrate.yaml
+kubectl --context=minikube -n default wait --for=condition=complete job/expenses-migrate --timeout=300s
+kubectl --context=minikube -n default apply -f k8s/05-app.yaml
+kubectl --context=minikube -n default rollout status deployment/expenses-app --timeout=180s
+kubectl --context=minikube -n default get pods,services,pvc
+```
+
+В ручном запуске переходите к следующему этапу только после успеха предыдущего.
+Один `kubectl apply -f k8s/` не обеспечивает ожидание готовности базы и миграций.
+Под Job со статусом `Completed` — нормальный результат.
+Пароль `super_secret_password` в `k8s/02-secret.yaml` предназначен для локального учебного запуска.
+Смена Secret после инициализации тома не меняет пароль существующей роли PostgreSQL.
+
+### UI и масштабирование
+
+В отдельном терминале запустите и оставьте работающей команду:
+
+```sh
+kubectl --context=minikube -n default port-forward service/expenses-app 8080:8080
+```
+
+Откройте http://localhost:8080. Создайте категорию, добавьте расход и примените фильтр.
+Если порт занят, используйте `8081:8080` и http://localhost:8081.
+
+В другом терминале:
+
+```sh
+kubectl --context=minikube -n default scale deployment/expenses-app --replicas=3
+kubectl --context=minikube -n default rollout status deployment/expenses-app --timeout=180s
+kubectl --context=minikube -n default get pods -o wide
+kubectl --context=minikube -n default get deployment expenses-app
+```
+
+Ожидается `READY 3/3`. Все реплики используют общую PostgreSQL. Базу оставляем в одном
+экземпляре. `port-forward` выбирает один под, поэтому сам по себе не демонстрирует
+балансировку между тремя репликами. После удаления выбранного пода его нужно запустить заново.
+Повторный `make k8s-up` возвращает число реплик к указанному в YAML значению `1`.
+
+### Обновление, диагностика и остановка
+
+После изменения исходников пересоберите образ по инструкции выше, выполните `make k8s-up`,
+а затем перезапустите поды, чтобы они использовали новый образ с тем же тегом:
+
+```sh
+kubectl --context=minikube -n default rollout restart deployment/expenses-app
+kubectl --context=minikube -n default rollout status deployment/expenses-app --timeout=180s
+```
+
+Диагностика:
+
+```sh
+kubectl --context=minikube -n default logs -l app=expenses-app --tail=100
+kubectl --context=minikube -n default logs job/expenses-migrate
+kubectl --context=minikube -n default describe pods -l app=expenses-postgres
+kubectl --context=minikube -n default get events --sort-by=.metadata.creationTimestamp
+```
+
+Для остановки с сохранением данных используйте `minikube stop`, для продолжения —
+`minikube start`. PVC сохраняет данные при пересоздании пода PostgreSQL. Удаление
+PVC или всего кластера может удалить данные. Для обычной остановки
+эти операции не нужны.
 
 ## Настройки
 
@@ -148,6 +250,6 @@ TEST_DATABASE_URL='postgres://expenses:expenses_local_password@127.0.0.1:5432/ex
 make archive
 ```
 
-Нужен Python 3.9+. В `dist/AccountingForExpenses.zip` попадут текущие исходники, тесты, настройки сборки, этот README и `Отчёт.md`, включая ещё не закоммиченные изменения. `.git`, рабочий `.env`, бинарные файлы и отчёты покрытия не включаются. После распаковки перейдите в каталог `AccountingForExpenses` и следуйте инструкции запуска выше.
+Нужен Python 3.9+. В `dist/AccountingForExpenses.zip` попадут текущие исходники, тесты, настройки сборки, манифесты `k8s/`, этот README и `Отчёт.md`, включая ещё не закоммиченные изменения. `.git`, рабочий `.env`, бинарные файлы и отчёты покрытия не включаются. После распаковки перейдите в каталог `AccountingForExpenses` и следуйте инструкции запуска выше. Скринкаст нужно добавить в архив отдельно перед сдачей; `make archive` пересоздаёт архив и не добавляет видео автоматически.
 
 В приложении пока нет авторизации, отдельных пользователей, лимитов бюджета и пагинации. Все записи составляют один личный бюджет. Для учебного запуска сервер по умолчанию доступен только с локального компьютера.

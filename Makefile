@@ -8,7 +8,7 @@ PYTHON ?= python3
 
 .PHONY: help run build test test-web test-race test-integration test-e2e migrate cover fmt vet check
 .PHONY: docker-build docker-up docker-down docker-migrate docker-logs docker-config
-.PHONY: archive
+.PHONY: archive k8s-up
 
 help:
 	@printf '%s\n' \
@@ -20,6 +20,7 @@ help:
 		'make docker-migrate — запустить миграции отдельным контейнером' \
 		'make docker-logs — показать логи окружения' \
 		'make docker-config — проверить конфигурацию Compose' \
+		'make k8s-up    — развернуть приложение и миграции в minikube (нужен собранный образ)' \
 		'make test      — запустить тесты' \
 		'make test-web  — проверить денежные расчёты интерфейса (нужен Node.js 18+)' \
 		'make test-race — запустить тесты с детектором гонок (нужны CGO и C-компилятор)' \
@@ -37,6 +38,9 @@ run:
 
 archive:
 	$(PYTHON) scripts/archive.py
+
+k8s-up:
+	bash scripts/k8s-up.sh
 
 docker-build:
 	$(COMPOSE) build

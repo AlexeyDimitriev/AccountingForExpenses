@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: expenses-migrate
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: expenses-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: accounting-for-expenses:local
+        imagePullPolicy: IfNotPresent
+        command:
+        - /app/migrate
+        envFrom:
+        - configMapRef:
+            name: expenses-config
+        - secretRef:
+            name: expenses-db
